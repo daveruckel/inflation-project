@@ -220,6 +220,139 @@ fig2.update_layout(
 st.plotly_chart(fig2, use_container_width=True)
 st.caption("Green = under 3% | Orange = 3–5% | Red = over 5%. Source: BLS CPI-U via FRED.")
 
+# ── expense breakdown ─────────────────────────────────────
+st.subheader("Monthly expenses at career start")
+
+expenses = [
+    {"name": "Housing",             "pct": 0.274},
+    {"name": "Groceries",           "pct": 0.141},
+    {"name": "Healthcare",          "pct": 0.078},
+    {"name": "Transportation",      "pct": 0.079},
+    {"name": "Utilities",           "pct": 0.072},
+    {"name": "Childcare/activities","pct": 0.061},
+    {"name": "Goods & services",    "pct": 0.052},
+]
+
+MONTHLY_EXPENSES_NOW = 9567.0
+NOW_CPI = 330.293
+
+df_cpi_annual = query("SELECT year, avg_cpi FROM gold.annual_cpi ORDER BY year")
+cpi_map = dict(zip(df_cpi_annual["year"], df_cpi_annual["avg_cpi"]))
+
+a_start_cpi = cpi_map.get(a_start, NOW_CPI)
+b_start_cpi = cpi_map.get(b_start, NOW_CPI)
+
+exp_col1, exp_col2 = st.columns(2)
+
+with exp_col1:
+    st.markdown(f"**Gen A — {a_start}**")
+    for e in expenses:
+        cost = MONTHLY_EXPENSES_NOW * e["pct"] * (a_start_cpi / NOW_CPI)
+        pct  = int((cost / (MONTHLY_EXPENSES_NOW * e["pct"])) * 100)
+        st.markdown(
+            f"<div style='display:flex;justify-content:space-between;"
+            f"font-size:13px;margin-bottom:4px'>"
+            f"<span>{e['name']}</span><span>${cost:,.0f}/mo</span></div>"
+            f"<div style='background:#e8e8e8;border-radius:3px;height:6px;margin-bottom:8px'>"
+            f"<div style='background:#1D9E75;width:{pct}%;height:100%;border-radius:3px'></div></div>",
+            unsafe_allow_html=True
+        )
+    total_a = MONTHLY_EXPENSES_NOW * (a_start_cpi / NOW_CPI)
+    st.markdown(f"**Total: ${total_a:,.0f}/mo**")
+
+with exp_col2:
+    st.markdown(f"**Gen B — {b_start}**")
+    for e in expenses:
+        cost = MONTHLY_EXPENSES_NOW * e["pct"] * (b_start_cpi / NOW_CPI)
+        pct  = int((cost / (MONTHLY_EXPENSES_NOW * e["pct"])) * 100)
+        st.markdown(
+            f"<div style='display:flex;justify-content:space-between;"
+            f"font-size:13px;margin-bottom:4px'>"
+            f"<span>{e['name']}</span><span>${cost:,.0f}/mo</span></div>"
+            f"<div style='background:#e8e8e8;border-radius:3px;height:6px;margin-bottom:8px'>"
+            f"<div style='background:#185FA5;width:{pct}%;height:100%;border-radius:3px'></div></div>",
+            unsafe_allow_html=True
+        )
+    total_b = MONTHLY_EXPENSES_NOW * (b_start_cpi / NOW_CPI)
+    st.markdown(f"**Total: ${total_b:,.0f}/mo**")
+
+# ── summary table ─────────────────────────────────────────
+st.subheader("Career comparison")
+
+a_label = f"{a_start}–today" if a_still else f"{a_start}–{a_end}"
+b_label = f"{b_start}–today" if b_still else f"{b_start}–{b_end}"
+
+a_end_cpi   = cpi_map.get(a_end_year, NOW_CPI)
+b_end_cpi   = cpi_map.get(b_end_year, NOW_CPI)
+infla_a     = round(((a_end_cpi / a_start_cpi) - 1) * 100)
+infla_b     = round(((b_end_cpi / b_start_cpi) - 1) * 100)
+cpi_beats_a = infla_a > (a_wage * (a_end_year - a_start))
+cpi_beats_b = infla_b > (b_wage * (b_end_year - b_start))
+
+summary = {
+    "Metric": [
+        "Career span",
+        "Starting salary",
+        "Salary at end of career",
+        "Monthly surplus at start",
+        "Monthly surplus at end",
+        "Best month",
+        "Worst month",
+        "Cumulative inflation",
+        "Inflation outpaced wages?",
+    ],
+    f"Gen A ({a_label})": [
+        f"{a_end_year - a_start} years",
+        f"${a_income:,.0f}",
+        f"${df_a['nominal_salary'].iloc[-1]:,.0f}",
+        f"${df_a['monthly_surplus'].iloc[0]:,.0f}/mo",
+        f"${df_a['monthly_surplus'].iloc[-1]:,.0f}/mo",
+        f"${best_a['monthly_surplus']:,.0f}/mo ({int(best_a['calc_year'])})",
+        f"${worst_a['monthly_surplus']:,.0f}/mo ({int(worst_a['calc_year'])})",
+        f"+{infla_a}%",
+        "Yes — lost ground" if cpi_beats_a else "No — kept pace",
+    ],
+    f"Gen B ({b_label})": [
+        f"{b_end_year - b_start} years",
+        f"${b_income:,.0f}",
+        f"${df_b['nominal_salary'].iloc[-1]:,.0f}",
+        f"${df_b['monthly_surplus'].iloc[0]:,.0f}/mo",
+        f"${df_b['monthly_surplus'].iloc[-1]:,.0f}/mo",
+        f"${best_b['monthly_surplus']:,.0f}/mo ({int(best_b['calc_year'])})",
+        f"${worst_b['monthly_surplus']:,.0f}/mo ({int(worst_b['calc_year'])})",
+        f"+{infla_b}%",
+        "Yes — lost ground" if cpi_beats_b else "No — kept pace",
+    ],
+}
+
+st.dataframe(summary, use_container_width=True, hide_index=True)
+
+# ── verdict ───────────────────────────────────────────────
+st.subheader("The verdict")
+
+winner = "Gen A" if df_a["monthly_surplus"].iloc[0] > df_b["monthly_surplus"].iloc[0] else "Gen B"
+gap    = abs(df_a["monthly_surplus"].iloc[0] - df_b["monthly_surplus"].iloc[0])
+
+verdict_color = "#EAF3DE" if winner == "Gen A" else "#FCEBEB"
+verdict_text_color = "#27500A" if winner == "Gen A" else "#791F1F"
+
+st.markdown(
+    f"<div style='background:{verdict_color};border-radius:12px;padding:1.25rem;'>"
+    f"<p style='color:{verdict_text_color};font-size:15px;font-weight:500;margin-bottom:8px'>"
+    f"{winner} started with ${gap:,.0f}/mo more breathing room.</p>"
+    f"<p style='color:{verdict_text_color};font-size:13px;line-height:1.65;margin:0'>"
+    f"Gen A ({a_start}) started at ${df_a['monthly_surplus'].iloc[0]:,.0f}/mo surplus against "
+    f"${total_a:,.0f}/mo in expenses. "
+    f"Gen B ({b_start}) started at ${df_b['monthly_surplus'].iloc[0]:,.0f}/mo surplus against "
+    f"${total_b:,.0f}/mo in expenses. "
+    f"By {b_end_year}, Gen B needed ${b_income * ((b_end_cpi / b_start_cpi)):,.0f} "
+    f"just to match their own starting purchasing power after {infla_b}% cumulative inflation. "
+    f"The 2021–2023 inflation spike — peaking at 8.98% in 2022 — is visible in the chart "
+    f"for anyone whose career overlaps it. Wages did not keep pace."
+    f"</p></div>",
+    unsafe_allow_html=True
+)
+
 # ── footer ────────────────────────────────────────────────
 st.divider()
 st.caption(
